@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dashboard</title>
+    <style>
+        body {
+            font-family: Arial;
+            margin: 30px;
+            background: #f5f6fa;
+        }
+
+        h2 {
+            margin-bottom: 10px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+        }
+
+        input, select {
+            width: 100%;
+            padding: 8px;
+            margin: 5px 0 15px;
+        }
+
+        button {
+            padding: 8px 15px;
+            cursor: pointer;
+        }
+
+        .error {
+            color: red;
+            margin-bottom: 10px;
+        }
+
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-top: 10px;
+        }
+
+        th, td {
+            border: 1px solid #ddd;
+            padding: 6px;
+            text-align: center;
+        }
+
+        th {
+            background: #eee;
+        }
+
+        .card {
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin-top: 10px;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+
+<h2>Policy Calculator</h2>
+<button onclick="logout()">Logout</button>
+
+<hr>
+
+<h3>Enter Details</h3>
+
+<div id="error" class="error"></div>
+
+<input id="dob" type="date" placeholder="Select Date of Birth">
+
+<select id="gender">
+    <option value="">Select Gender</option>
+    <option>Male</option>
+    <option>Female</option>
+</select>
+
+<input id="premium" type="number" placeholder="Enter Premium Amount (Max 50000)">
+
+<input id="pt" type="number" placeholder="Policy Term (Max 20 years)">
+
+<input id="ppt" type="number" placeholder="Premium Paying Term (<= PT)">
+
+<select id="frequency">
+    <option value="">Select Frequency</option>
+    <option>Yearly</option>
+    <option>Monthly</option>
+</select>
+
+<input id="sum_assured" type="number" placeholder="Enter Sum Assured">
+
+<button onclick="calculate()">Calculate</button>
+
+<h3 id="irr"></h3>
+
+<h3>Illustration</h3>
+<table id="resultTable"></table>
+
+<hr>
+
+<h3>History</h3>
+<button onclick="loadHistory()">Load History</button>
+<div id="history"></div>
+
+</div>
+
+<script>
+
+// Field label mapping
+const fieldMap = {
+    dob: "Date of Birth",
+    gender: "Gender",
+    premium: "Premium Amount",
+    pt: "Policy Term",
+    ppt: "Premium Paying Term",
+    frequency: "Frequency",
+    sum_assured: "Sum Assured"
+};
+
+// Auth check
+window.onload = function () {
+    const token = localStorage.getItem("token");
+    if (!token) window.location.href = "/login";
+};
+
+function getToken() {
+    return localStorage.getItem("token");
+}
+
+function logout() {
+    localStorage.removeItem("token");
+    window.location.href = "/login";
+}
+
+// CLEAN ERROR MESSAGE
+function cleanMessage(msg) {
+    return msg
+        .replace("should be less than or equal to", "must be ≤")
+        .replace("should be greater than or equal to", "must be ≥");
+}
+
+// CALCULATE
+async function calculate() {
+    const token = getToken();
+
+    const payload = {
+        dob: document.getElementById("dob").value,
+        gender: document.getElementById("gender").value,
+        premium: Number(document.getElementById("premium").value),
+        pt: Number(document.getElementById("pt").value),
+        ppt: Number(document.getElementById("ppt").value),
+        frequency: document.getElementById("frequency").value,
+        sum_assured: Number(document.getElementById("sum_assured").value)
+    };
+
+    const res = await fetch("/policy/calculate", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + token
+        },
+        body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+        let errorMsg = "Validation error";
+
+        if (Array.isArray(data.detail)) {
+            errorMsg = data.detail.map(e => {
+                const field = e.loc[e.loc.length - 1];
+                const name = fieldMap[field] || field;
+                return `${name}: ${cleanMessage(e.msg)}`;
+            }).join("<br>");
+        } else if (typeof data.detail === "string") {
+            errorMsg = data.detail;
+        }
+
+        document.getElementById("error").innerHTML = errorMsg;
+        return;
+    }
+
+    document.getElementById("error").innerHTML = "";
+
+    // IRR
+    document.getElementById("irr").innerText = "IRR: " + data.data.irr;
+
+    // Illustration Table
+    const table = document.getElementById("resultTable");
+    table.innerHTML = "";
+
+    const rows = data.data.illustration;
+
+    if (rows && rows.length > 0) {
+        const headers = Object.keys(rows[0]);
+
+        let headerRow = "<tr>";
+        headers.forEach(h => headerRow += "<th>" + h + "</th>");
+        headerRow += "</tr>";
+
+        table.innerHTML += headerRow;
+
+        rows.forEach(row => {
+            let tr = "<tr>";
+            headers.forEach(h => {
+                tr += "<td>" + row[h] + "</td>";
+            });
+            tr += "</tr>";
+            table.innerHTML += tr;
+        });
+    }
+}
+
+// HISTORY
+async function loadHistory() {
+    const token = getToken();
+
+    const res = await fetch("/policy/history", {
+        headers: {
+            "Authorization": "Bearer " + token
+        }
+    });
+
+    const data = await res.json();
+
+    const container = document.getElementById("history");
+    container.innerHTML = "";
+
+    data.data.forEach((item, index) => {
+        const div = document.createElement("div");
+        div.className = "card";
+
+        div.innerHTML = `
+            <p>
+                <b>IRR:</b> ${item.irr} |
+                <b>Date:</b> ${item.created_at}
+                <button onclick="toggle(${index})">View</button>
+            </p>
+            <div id="detail-${index}" style="display:none;"></div>
+        `;
+
+        container.appendChild(div);
+    });
+
+    window.historyData = data.data;
+}
+
+// TOGGLE HISTORY
+function toggle(index) {
+    const el = document.getElementById(`detail-${index}`);
+
+    if (el.style.display === "none") {
+
+        let record = window.historyData[index];
+        let resultData = record.result_data;
+
+        try {
+            if (typeof resultData === "string") {
+                resultData = JSON.parse(resultData);
+            }
+        } catch (e) {
+            console.error("Parse error:", e);
+        }
+
+        if (!resultData || !resultData.illustration) {
+            el.innerHTML = "<p style='color:red;'>No illustration data</p>";
+            el.style.display = "block";
+            return;
+        }
+
+        const illustration = resultData.illustration;
+
+        let html = "<table><tr><th>Year</th><th>Premium</th><th>Benefit</th></tr>";
+
+        illustration.forEach(row => {
+            html += `<tr>
+                <td>${row.year}</td>
+                <td>${row.premium}</td>
+                <td>${row.total_benefit}</td>
+            </tr>`;
+        });
+
+        html += "</table>";
+
+        el.innerHTML = html;
+        el.style.display = "block";
+
+    } else {
+        el.style.display = "none";
+    }
+}
+
+</script>
+
+</body>
+</html>
